@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Retroboots Dashboard</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="command-header">
+        <div class="header-left">
+          <div class="brand-block">
+            <div class="brand-mark" aria-hidden="true">
+              <span class="brand-mark-ring"></span>
+              <span class="brand-mark-core">R</span>
+              <span class="brand-mark-tail"></span>
+            </div>
+            <div>
+              <p class="eyebrow">Retroboots Intelligence</p>
+              <div class="brand-wordmark">Retroboots</div>
+              <div class="brand-submark">Business Operating System</div>
+            </div>
+          </div>
+        </div>
+        <div class="header-center">
+          <h1>Business Control Center</h1>
+          <p class="page-intro">A sharper operating view for revenue, inventory, profit and the decisions that matter today.</p>
+        </div>
+        <div class="header-right">
+          <div class="header-status">
+            <div class="status-card">
+              <span class="status-label">Data Source</span>
+              <strong id="data-source-label">Loading</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Updated</span>
+              <strong id="generated-at">-</strong>
+            </div>
+          </div>
+          <button id="refresh-dashboard" class="primary-button" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 8 14 6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor"/></svg>
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <nav class="section-nav top-nav" aria-label="Sections">
+        <a href="#summary" class="nav-link active">Overview</a>
+        <a href="#signals" class="nav-link">Signals</a>
+        <a href="#analytics" class="nav-link">Analytics</a>
+        <a href="#markets" class="nav-link">Markets</a>
+        <a href="#workbench" class="nav-link">Decision Desk</a>
+      </nav>
+
+      <main class="main-stage">
+        <section id="signals" class="surface section filter-stage">
+          <div class="section-header filter-stage-header">
+            <div>
+              <p class="section-kicker">Control Layer</p>
+              <h2>Scope The View</h2>
+              <p>Filter the business where decisions happen, compare slices quickly and keep active context visible.</p>
+            </div>
+            <div class="filter-stage-actions">
+              <div class="section-note" id="summary-note">No filters active</div>
+              <button id="reset-filters" class="secondary-button" type="button">Reset Filters</button>
+            </div>
+          </div>
+          <div class="filter-stage-grid">
+            <label class="field">
+              <span>Status</span>
+              <select id="status-filter"></select>
+            </label>
+            <label class="field">
+              <span>Brand</span>
+              <select id="brand-filter"></select>
+            </label>
+            <label class="field">
+              <span>Channel</span>
+              <select id="channel-filter"></select>
+            </label>
+            <label class="field">
+              <span>Time Range</span>
+              <select id="period-filter">
+                <option value="all">All Time</option>
+                <option value="30">Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+                <option value="365">Last 365 Days</option>
+              </select>
+            </label>
+          </div>
+          <div class="chip-row filter-chip-row" id="active-filter-chips"></div>
+        </section>
+
+        <section id="summary" class="section summary-stack" aria-label="North Star">
+          <article class="surface hero-panel">
+            <div class="hero-topline">
+              <div>
+                <p class="section-kicker">North Star</p>
+                <h2>What Runs The Business</h2>
+                <p class="hero-copy">Core revenue, capital and inventory metrics for fast daily decisions.</p>
+              </div>
+            </div>
+            <div class="north-star-cards" id="overall-kpi-grid"></div>
+          </article>
+
+          <div class="summary-row">
+            <article class="surface focus-panel">
+              <div class="focus-header">
+                <p class="section-kicker">Year Focus</p>
+                <h2>2026 Focus</h2>
+                <p>The metrics that matter most for the current operating year.</p>
+              </div>
+              <div class="focus-cards" id="year-kpi-grid"></div>
+            </article>
+
+            <article class="surface queue-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Action Queue</p>
+                  <h2>What Needs Action Now</h2>
+                  <p>Daily priorities, compressed into a short queue that forces focus.</p>
+                </div>
+              </div>
+              <div class="priority-list" id="priority-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="analytics" class="section analytics-grid">
+            <article class="surface panel trend-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Momentum</p>
+                  <h2>Revenue Trend & Demand Direction</h2>
+                  <p>See whether demand is accelerating, stalling or rolling over.</p>
+                </div>
+                <div class="panel-meta" id="trend-meta">Monthly</div>
+              </div>
+              <div id="trend-chart" class="chart-area"></div>
+            </article>
+
+            <article class="surface panel health-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Health</p>
+                  <h2>Business Quality</h2>
+                  <p>Inventory health, profit quality and stock pressure in one place.</p>
+                </div>
+              </div>
+              <div id="business-health" class="mini-metric-grid"></div>
+            </article>
+
+            <article class="surface panel forecast-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Probabilistic Forecast</p>
+                  <h2>3-Month Outlook</h2>
+                  <p>Multi-layer forecast scoring each inventory item by brand velocity, aging decay and pricing readiness.</p>
+                </div>
+              </div>
+              <div id="forecast-outlook" class="forecast-grid"></div>
+            </article>
+
+            <article class="surface panel margin-dist-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Profit Quality</p>
+                  <h2>Margin Distribution</h2>
+                  <p>How sales distribute across margin brackets. Spot profit concentration or leaks.</p>
+                </div>
+              </div>
+              <div id="margin-distribution" class="list-block"></div>
+            </article>
+
+            <article class="surface panel winners-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Winners</p>
+                  <h2>Revenue Drivers</h2>
+                  <p>The models currently carrying demand, revenue and cash generation.</p>
+                </div>
+              </div>
+              <div id="top-models" class="list-block"></div>
+            </article>
+
+            <article class="surface panel capital-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Capital At Risk</p>
+                  <h2>Inventory Age & Capital Load</h2>
+                  <p>Where inventory is aging and capital is stuck without enough return.</p>
+                </div>
+              </div>
+              <div id="age-buckets" class="list-block"></div>
+            </article>
+
+            <article class="surface panel price-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Pricing Power</p>
+                  <h2>Price Realization</h2>
+                  <p>How close actual sales land to target prices. Measures pricing discipline.</p>
+                </div>
+              </div>
+              <div id="price-realization" class="mini-metric-grid"></div>
+            </article>
+
+            <article class="surface panel brand-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Profit Engine</p>
+                  <h2>Brand & Profit Pool</h2>
+                  <p>Which brands actually generate revenue, profit and inventory quality.</p>
+                </div>
+              </div>
+              <div class="table-shell" id="brand-performance"></div>
+            </article>
+
+            <article class="surface panel demand-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Demand Source</p>
+                  <h2>Demand Sources</h2>
+                  <p>Which channels are truly creating demand and revenue right now.</p>
+                </div>
+              </div>
+              <div id="channel-performance" class="list-block"></div>
+            </article>
+          </section>
+
+          <section id="markets" class="section markets-grid">
+            <article class="surface panel country-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Geography</p>
+                  <h2>Country Performance</h2>
+                  <p>Revenue and sales volume by destination market.</p>
+                </div>
+              </div>
+              <div id="country-performance" class="list-block"></div>
+            </article>
+
+            <article class="surface panel size-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Product Mix</p>
+                  <h2>Size Distribution</h2>
+                  <p>Which sizes sell fastest and which sit in stock. Informs buying decisions.</p>
+                </div>
+              </div>
+              <div id="size-distribution" class="list-block"></div>
+            </article>
+
+            <article class="surface panel source-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Supply Chain</p>
+                  <h2>Purchase Sources</h2>
+                  <p>Where inventory is sourced from and the quality of each source.</p>
+                </div>
+              </div>
+              <div id="purchase-sources" class="list-block"></div>
+            </article>
+
+            <article class="surface panel turnover-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="section-kicker">Velocity</p>
+                  <h2>Inventory Turnover</h2>
+                  <p>How fast capital cycles through inventory into revenue.</p>
+                </div>
+              </div>
+              <div id="inventory-turnover" class="mini-metric-grid"></div>
+            </article>
+          </section>
+
+          <section id="workbench" class="surface section workbench-section">
+            <div class="section-header">
+              <div>
+                <p class="section-kicker">Decision Desk</p>
+                <h2>From Signal To Decision</h2>
+                <p>The workbench is reduced to the four action areas that actually drive decisions.</p>
+              </div>
+              <div class="section-note" id="workbench-counts">0 records</div>
+            </div>
+
+            <div class="tab-bar" role="tablist" aria-label="Table sections">
+              <button class="tab-button is-active" type="button" data-table="opportunities">Growth</button>
+              <button class="tab-button" type="button" data-table="risks">Risk</button>
+              <button class="tab-button" type="button" data-table="inventory">Inventory Actions</button>
+              <button class="tab-button" type="button" data-table="margin-leaks">Margin Leaks</button>
+            </div>
+
+            <div class="table-card is-active" data-table-panel="opportunities">
+              <div class="table-header">
+                <div>
+                  <h3>Growth Queue</h3>
+                  <p>Models with demand, momentum or restock leverage.</p>
+                </div>
+                <div class="table-caption" id="opportunities-count">0 items</div>
+              </div>
+              <div class="table-shell" id="opportunities"></div>
+            </div>
+
+            <div class="table-card" data-table-panel="risks">
+              <div class="table-header">
+                <div>
+                  <h3>Risk Queue</h3>
+                  <p>Stock pressure, tied-up capital, weak demand and operating issues.</p>
+                </div>
+                <div class="table-caption" id="risks-count">0 items</div>
+              </div>
+              <div class="table-shell" id="risks"></div>
+            </div>
+
+            <div class="table-card" data-table-panel="inventory">
+              <div class="table-header">
+                <div>
+                  <h3>Inventory Actions</h3>
+                  <p>Which items need repricing, monitoring or active inventory relief?</p>
+                </div>
+                <div class="table-caption" id="inventory-count">0 items</div>
+              </div>
+              <div class="table-shell" id="inventory-actions"></div>
+            </div>
+
+            <div class="table-card" data-table-panel="margin-leaks">
+              <div class="table-header">
+                <div>
+                  <h3>Margin Leaks</h3>
+                  <p>Sales where margin quality breaks down or profit leaks out.</p>
+                </div>
+                <div class="table-caption" id="margin-leaks-count">0 items</div>
+              </div>
+              <div class="table-shell" id="margin-leaks"></div>
+            </div>
+          </section>
+
+          <footer class="dashboard-footer">
+            <p>Retroboots Business Operating System &middot; Data-driven decisions for sneaker commerce</p>
+          </footer>
+      </main>
+    </div>
+
+    <script src="./settings.js"></script>
+    <script src="./data/retroboots-data.js"></script>
+    <script src="./app.js"></script>
+    <div id="ui-tooltip" class="ui-tooltip" hidden></div>
+  </body>
+  </html>
