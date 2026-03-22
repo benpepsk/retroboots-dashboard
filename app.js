@@ -694,15 +694,46 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
 
-  // ─── MULTI-LAYER PROBABILISTIC FORECAST ENGINE ───
+  // ─── FULL-CYCLE FORECAST ENGINE v2 ───
+  // Considers: purchase pipeline, model demand, size velocity, brand mix,
+  // aging decay, fresh-stock boost, and dynamic stock evolution.
 
-  function buildBrandVelocity(rows) {
-    const brands = new Map();
-    rows.forEach((r) => {
+  function agingDecay(daysInStock) {
+    if (daysInStock <= 30) return 1.0;
+    if (daysInStock <= 60) return 0.95;
+    if (daysInStock <= 90) return 0.82;
+    if (daysInStock <= 120) return 0.65;
+    if (daysInStock <= 180) return 0.40;
+    if (daysInStock <= 270) return 0.22;
+    if (daysInStock <= 365) return 0.10;
+    return 0.04;
+  }
+
+  function agingPriceDiscount(daysInStock) {
+    if (daysInStock <= 30) return 1.02;  // fresh stock can sell above target
+    if (daysInStock <= 60) return 1.0;
+    if (daysInStock <= 120) return 0.94;
+    if (daysInStock <= 180) return 0.84;
+    if (daysInStock <= 270) return 0.70;
+    return 0.55;
+  }
+
+  function buildForecastIntelligence(rows) {
+    const sold = rows.filter((r) => r.sold_units);
+    const inventory = rows.filter((r) => r.inventory_units);
+    const all = rows;
+
+    // ─── BRAND INTELLIGENCE ───
+    const brandMap = new Map();
+    all.forEach((r) => {
       const b = r.brand || "_unknown";
-      if (!brands.has(b)) brands.set(b, { sold: 0, stock: 0, totalItems: 0, revenue: 0, profit: 0, soldDates: [] });
-      const g = brands.get(b);
-      g.totalItems += 1;
+      if (!brandMap.has(b)) brandMap.set(b, {
+        sold: 0, stock: 0, total: 0, revenue: 0, profit: 0,
+        soldDates: [], purchaseDates: [], purchaseCost: 0,
+        models: new Map(), sizes: new Map()
+      });
+      const g = brandMap.get(b);
+      g.total += 1;
       if (r.sold_units) {
         g.sold += 1;
         g.revenue += r.sale_price_net || 0;
@@ -711,83 +742,158 @@
         if (d) g.soldDates.push(d);
       }
       if (r.inventory_units) g.stock += 1;
+      const pd = date(r.purchase_date);
+      if (pd) g.purchaseDates.push(pd);
+      g.purchaseCost += r.purchase_price_net || 0;
+      // Model tracking
+      const model = r.model || r.series || "_unknown";
+      if (!g.models.has(model)) g.models.set(model, { sold: 0, stock: 0 });
+      const mm = g.models.get(model);
+      if (r.sold_units) mm.sold += 1;
+      if (r.inventory_units) mm.stock += 1;
+      // Size tracking
+      const sz = r.size || "_unknown";
+      if (!g.sizes.has(sz)) g.sizes.set(sz, { sold: 0, stock: 0 });
+      const sm = g.sizes.get(sz);
+      if (r.sold_units) sm.sold += 1;
+      if (r.inventory_units) sm.stock += 1;
     });
-    brands.forEach((g, key) => {
-      g.sellThrough = g.totalItems ? g.sold / g.totalItems : 0;
+
+    brandMap.forEach((g) => {
+      g.sellThrough = g.total ? g.sold / g.total : 0;
       g.avgPrice = g.sold ? g.revenue / g.sold : 0;
       g.avgProfit = g.sold ? g.profit / g.sold : 0;
       g.avgMargin = g.revenue ? g.profit / g.revenue : 0;
-      // Monthly velocity from date spread
-      const sorted = g.soldDates.sort((a, b) => a - b);
-      if (sorted.length >= 2) {
-        const spanDays = (sorted[sorted.length - 1] - sorted[0]) / 86400000;
-        g.monthlyVelocity = (g.sold / Math.max(spanDays / 30, 1));
+      const sortedSales = g.soldDates.sort((a, b) => a - b);
+      if (sortedSales.length >= 2) {
+        const span = (sortedSales[sortedSales.length - 1] - sortedSales[0]) / 86400000;
+        g.monthlyVelocity = g.sold / Math.max(span / 30, 1);
       } else {
-        g.monthlyVelocity = g.sold > 0 ? g.sold / 6 : 0; // assume 6 month spread
+        g.monthlyVelocity = g.sold > 0 ? g.sold / 6 : 0;
+      }
+      const sortedPurchases = g.purchaseDates.sort((a, b) => a - b);
+      if (sortedPurchases.length >= 2) {
+        const span = (sortedPurchases[sortedPurchases.length - 1] - sortedPurchases[0]) / 86400000;
+        g.monthlyPurchaseRate = g.total / Math.max(span / 30, 1);
+      } else {
+        g.monthlyPurchaseRate = 0;
       }
     });
-    return brands;
+
+    // ─── MODEL INTELLIGENCE ───
+    const modelMap = new Map();
+    all.forEach((r) => {
+      const key = `${r.brand || ""}::${r.model || r.series || ""}`;
+      if (!modelMap.has(key)) modelMap.set(key, {
+        brand: r.brand, model: r.model || r.series || "_unknown",
+        sold: 0, stock: 0, revenue: 0, profit: 0, avgDaysToSell: []
+      });
+      const m = modelMap.get(key);
+      if (r.sold_units) {
+        m.sold += 1;
+        m.revenue += r.sale_price_net || 0;
+        m.profit += r.gross_profit || 0;
+        const buy = date(r.purchase_date);
+        const sell = date(r.sale_date);
+        if (buy && sell) m.avgDaysToSell.push((sell - buy) / 86400000);
+      }
+      if (r.inventory_units) m.stock += 1;
+    });
+
+    modelMap.forEach((m) => {
+      m.sellThrough = (m.sold + m.stock) ? m.sold / (m.sold + m.stock) : 0;
+      m.avgPrice = m.sold ? m.revenue / m.sold : 0;
+      m.velocity = m.avgDaysToSell.length
+        ? m.avgDaysToSell.reduce((a, b) => a + b, 0) / m.avgDaysToSell.length
+        : 999;
+      m.demandScore = Math.min(1, (m.sellThrough * 0.5) + (Math.min(m.sold, 10) / 10 * 0.3) + (m.velocity < 90 ? 0.2 : m.velocity < 180 ? 0.1 : 0));
+    });
+
+    // ─── SIZE INTELLIGENCE ───
+    const sizeMap = new Map();
+    all.forEach((r) => {
+      const sz = r.size;
+      if (!sz) return;
+      if (!sizeMap.has(sz)) sizeMap.set(sz, { sold: 0, stock: 0, revenue: 0 });
+      const s = sizeMap.get(sz);
+      if (r.sold_units) { s.sold += 1; s.revenue += r.sale_price_net || 0; }
+      if (r.inventory_units) s.stock += 1;
+    });
+
+    sizeMap.forEach((s) => {
+      s.sellThrough = (s.sold + s.stock) ? s.sold / (s.sold + s.stock) : 0;
+      s.demandScore = Math.min(1, s.sellThrough * 1.3);
+    });
+
+    // ─── PURCHASE PIPELINE ───
+    const now = new Date();
+    const recent3mo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const recentPurchases = all.filter((r) => {
+      const d = date(r.purchase_date);
+      return d && d >= recent3mo;
+    });
+    const monthlyPurchaseRate = recentPurchases.length / 3;
+    const purchaseBrandMix = new Map();
+    recentPurchases.forEach((r) => {
+      const b = r.brand || "_unknown";
+      purchaseBrandMix.set(b, (purchaseBrandMix.get(b) || 0) + 1);
+    });
+    const avgPurchaseCost = recentPurchases.length
+      ? sum(recentPurchases, (r) => r.purchase_price_net) / recentPurchases.length : 0;
+
+    // Purchase quality: are we buying brands that sell well?
+    let purchaseQuality = 0;
+    if (recentPurchases.length) {
+      purchaseQuality = recentPurchases.reduce((total, r) => {
+        const bd = brandMap.get(r.brand || "_unknown");
+        return total + (bd ? bd.sellThrough : 0.15);
+      }, 0) / recentPurchases.length;
+    }
+
+    return { brandMap, modelMap, sizeMap, monthlyPurchaseRate, purchaseBrandMix, avgPurchaseCost, purchaseQuality };
   }
 
-  function agingDecay(daysInStock) {
-    // Sigmoid-style decay: items start losing sellability after 60 days,
-    // accelerating loss after 120 days, near-zero by 360+
-    if (daysInStock <= 30) return 1.0;
-    if (daysInStock <= 60) return 0.95;
-    if (daysInStock <= 90) return 0.85;
-    if (daysInStock <= 120) return 0.70;
-    if (daysInStock <= 180) return 0.45;
-    if (daysInStock <= 270) return 0.25;
-    if (daysInStock <= 365) return 0.12;
-    return 0.05;
-  }
-
-  function agingPriceDiscount(daysInStock) {
-    // Older items tend to sell below target - model the expected discount
-    if (daysInStock <= 60) return 1.0;   // full price
-    if (daysInStock <= 120) return 0.95;  // 5% discount
-    if (daysInStock <= 180) return 0.85;  // 15% discount
-    if (daysInStock <= 270) return 0.72;  // 28% discount
-    return 0.60;                          // 40% discount for very old stock
-  }
-
-  function scoreInventoryItem(item, brandData, globalPriceRealization) {
-    const brand = brandData.get(item.brand || "_unknown") || { sellThrough: 0.2, avgPrice: 0, avgProfit: 0, avgMargin: 0, monthlyVelocity: 0 };
+  function scoreInventoryItem(item, intel, globalPriceRealization) {
+    const brand = intel.brandMap.get(item.brand || "_unknown") || { sellThrough: 0.15, avgPrice: 0, avgMargin: 0, monthlyVelocity: 0 };
+    const modelKey = `${item.brand || ""}::${item.model || item.series || ""}`;
+    const model = intel.modelMap.get(modelKey) || { demandScore: 0.15, avgPrice: 0, velocity: 999 };
+    const size = intel.sizeMap.get(item.size) || { demandScore: 0.2 };
     const days = item.days_in_stock || 0;
 
-    // Layer 1: Brand velocity score (0-1) - how well does this brand sell?
-    const brandScore = Math.min(1, brand.sellThrough * 1.5); // normalize around 66% sell-through
-
-    // Layer 2: Aging decay (0-1) - how old is this item?
+    // Layer 1: Brand velocity (0-1)
+    const brandScore = Math.min(1, brand.sellThrough * 1.4);
+    // Layer 2: Model demand (0-1)
+    const modelScore = model.demandScore;
+    // Layer 3: Size demand (0-1)
+    const sizeScore = size.demandScore;
+    // Layer 4: Aging decay (0-1)
     const ageScore = agingDecay(days);
+    // Layer 5: Pricing readiness (0-1)
+    const pricingScore = item.target_sale_price_net ? 1.0 : 0.55;
 
-    // Layer 3: Pricing readiness (0-1) - does it have a target price?
-    const pricingScore = item.target_sale_price_net ? 1.0 : 0.6;
+    // Weighted combination (model & brand matter most, then age, then size, then pricing)
+    const sellProbability = Math.min(0.95, Math.max(0.02,
+      Math.pow(brandScore, 0.25) *
+      Math.pow(modelScore, 0.30) *
+      Math.pow(sizeScore, 0.10) *
+      Math.pow(ageScore, 0.25) *
+      Math.pow(pricingScore, 0.10)
+    ));
 
-    // Combined probability: geometric mean to avoid any single zero killing it
-    const sellProbability = Math.pow(brandScore * ageScore * pricingScore, 0.7);
-
-    // Expected sale price: use target if available, else brand avg, with aging discount
+    // Expected sale price with aging discount
     const basePrice = item.target_sale_price_net
       ? item.target_sale_price_net * globalPriceRealization
-      : brand.avgPrice || item.purchase_price_net * 1.3 || 100;
+      : brand.avgPrice || model.avgPrice || item.purchase_price_net * 1.3 || 100;
     const expectedPrice = basePrice * agingPriceDiscount(days);
-
-    // Expected profit
     const cost = item.purchase_price_net || 0;
-    const expectedProfit = expectedPrice - cost;
 
     return {
-      item,
-      sellProbability: Math.min(0.95, Math.max(0.02, sellProbability)),
-      expectedPrice,
-      expectedProfit,
-      cost,
-      brandScore,
-      ageScore,
-      pricingScore,
-      daysInStock: days,
-      brand: item.brand
+      item, sellProbability, expectedPrice,
+      expectedProfit: expectedPrice - cost, cost,
+      brandScore, modelScore, sizeScore, ageScore, pricingScore,
+      daysInStock: days, brand: item.brand,
+      model: item.model || item.series || "_unknown",
+      size: item.size
     };
   }
 
@@ -795,25 +901,22 @@
     const sold = rows.filter((r) => r.sold_units && date(r.sale_date));
     const inventory = rows.filter((r) => r.inventory_units);
     if (!sold.length || !inventory.length) {
-      return { scenarios: null, monthly: [], drivers: null, waterfall: null, method: "Not enough data." };
+      return { scenarios: null, method: "Not enough data." };
     }
 
-    // Build brand-level intelligence
-    const brandVelocity = buildBrandVelocity(rows);
+    const intel = buildForecastIntelligence(rows);
 
-    // Global price realization rate
+    // Global price realization
     const withTarget = sold.filter((r) => r.target_sale_price_net);
     const globalPriceRealization = withTarget.length
       ? sum(withTarget, (r) => r.sale_price_net) / sum(withTarget, (r) => r.target_sale_price_net)
       : 0.92;
 
     // Score every inventory item
-    const scoredItems = inventory.map((item) => scoreInventoryItem(item, brandVelocity, globalPriceRealization));
-
-    // Sort by sell probability descending (best items sell first)
+    const scoredItems = inventory.map((item) => scoreInventoryItem(item, intel, globalPriceRealization));
     scoredItems.sort((a, b) => b.sellProbability - a.sellProbability);
 
-    // Global monthly demand baseline (weighted recent history)
+    // Demand history
     const lastSaleDate = sold.map((r) => date(r.sale_date)).sort((a, b) => a - b).pop();
     const anchor = new Date(lastSaleDate.getFullYear(), lastSaleDate.getMonth(), 1);
     const historyMonths = Array.from({ length: 6 }, (_, i) => addMonths(anchor, i - 5));
@@ -826,123 +929,160 @@
     });
     const historyArr = historyMonths.map((d) => historyMap.get(monthKey(d)));
     const weightedMonthly = historyArr.reduce((t, v, i) => t + v * (i + 1), 0) / historyArr.reduce((t, _, i) => t + (i + 1), 0);
-
-    // Momentum: compare recent 3 vs prior 3
     const recent3Avg = avg(historyArr.slice(-3).map((v) => ({ v })), (o) => o.v);
     const prior3Avg = avg(historyArr.slice(0, 3).map((v) => ({ v })), (o) => o.v);
-    const momentum = prior3Avg > 0 ? Math.min(1.4, Math.max(0.7, recent3Avg / prior3Avg)) : 1;
+    const momentum = prior3Avg > 0 ? Math.min(1.5, Math.max(0.6, recent3Avg / prior3Avg)) : 1;
 
-    // ─── THREE SCENARIOS ───
-    const scenarioMultipliers = {
-      conservative: { demandFactor: 0.7, priceFactor: 0.88, label: "Conservative" },
-      base: { demandFactor: 1.0, priceFactor: 1.0, label: "Base Case" },
-      optimistic: { demandFactor: 1.3, priceFactor: 1.08, label: "Optimistic" }
-    };
+    // ─── PURCHASE PIPELINE PROJECTION ───
+    // How many new items arrive per month, and what quality?
+    const purchaseRate = intel.monthlyPurchaseRate;
+    const purchaseQuality = intel.purchaseQuality;
+    const avgNewCost = intel.avgPurchaseCost || avg(inventory, (r) => r.purchase_price_net);
 
-    function runScenario(multiplier) {
-      const monthlyDemand = Math.max(1, weightedMonthly * momentum * multiplier.demandFactor);
-      let remaining = [...scoredItems];
-      const months = [];
-      let totalSold = 0, totalRevenue = 0, totalProfit = 0;
-
-      for (let m = 0; m < 3; m++) {
-        const monthDate = addMonths(anchor, m + 1);
-        const label = monthDate.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-
-        // Each month: simulate which items sell based on probability
-        // Budget = monthly demand (capped by remaining stock)
-        let budget = Math.min(Math.round(monthlyDemand), remaining.length);
-        let monthSold = 0, monthRevenue = 0, monthProfit = 0;
-        const stillRemaining = [];
-
-        for (const scored of remaining) {
-          if (monthSold >= budget) {
-            stillRemaining.push(scored);
-            continue;
-          }
-          // Roll against probability (deterministic: sell items above threshold)
-          // Threshold decreases each month (items get older, but we've already sorted by probability)
-          const threshold = 1 - (scored.sellProbability * (1 - m * 0.05)); // slight monthly decay
-          if (Math.random() < scored.sellProbability || scored.sellProbability > 0.3) {
-            // Deterministic approach: sell the top N items by probability
-            const price = scored.expectedPrice * multiplier.priceFactor;
-            const profit = price - scored.cost;
-            monthSold += 1;
-            monthRevenue += price;
-            monthProfit += profit;
-          } else {
-            stillRemaining.push(scored);
-          }
+    // Build typical new-arrival profile from recent purchase mix
+    function generateNewArrivals(count) {
+      const arrivals = [];
+      const brandWeights = [...intel.purchaseBrandMix.entries()].sort((a, b) => b[1] - a[1]);
+      const totalWeight = brandWeights.reduce((t, [, w]) => t + w, 0) || 1;
+      for (let i = 0; i < Math.round(count); i++) {
+        // Pick brand based on recent purchase distribution
+        let roll = Math.random() * totalWeight;
+        let pickedBrand = brandWeights[0] ? brandWeights[0][0] : "_unknown";
+        for (const [brand, weight] of brandWeights) {
+          roll -= weight;
+          if (roll <= 0) { pickedBrand = brand; break; }
         }
-
-        totalSold += monthSold;
-        totalRevenue += monthRevenue;
-        totalProfit += monthProfit;
-        remaining = stillRemaining;
-        months.push({ label, units: monthSold, revenue: monthRevenue, profit: monthProfit, remainingStock: remaining.length });
+        const bd = intel.brandMap.get(pickedBrand) || { avgPrice: 200, avgMargin: 0.3, sellThrough: 0.3 };
+        const estTargetPrice = avgNewCost * (1 + Math.max(bd.avgMargin || 0.3, 0.2));
+        arrivals.push({
+          sellProbability: Math.min(0.90, Math.max(0.3,
+            Math.pow(Math.min(1, (bd.sellThrough || 0.3) * 1.4), 0.3) * 0.95 // fresh stock boost
+          )),
+          expectedPrice: estTargetPrice * globalPriceRealization * 1.02, // fresh premium
+          cost: avgNewCost,
+          expectedProfit: estTargetPrice * globalPriceRealization * 1.02 - avgNewCost,
+          daysInStock: 0,
+          brand: pickedBrand,
+          isNewArrival: true
+        });
       }
-
-      return {
-        totalUnits: totalSold,
-        totalRevenue,
-        totalProfit,
-        totalMargin: totalRevenue ? (totalProfit / totalRevenue) * 100 : 0,
-        monthly: months,
-        remainingStock: remaining.length
-      };
+      return arrivals;
     }
 
-    // Use deterministic simulation (sort by probability, take top N)
-    function runDeterministicScenario(multiplier) {
-      const monthlyDemand = Math.max(1, weightedMonthly * momentum * multiplier.demandFactor);
+    // ─── THREE SCENARIOS ───
+    const scenarioConfig = {
+      conservative: { demandFactor: 0.7, priceFactor: 0.90, purchaseFactor: 0.5 },
+      base:         { demandFactor: 1.0, priceFactor: 1.0,  purchaseFactor: 1.0 },
+      optimistic:   { demandFactor: 1.3, priceFactor: 1.06, purchaseFactor: 1.2 }
+    };
+
+    function runScenario(config) {
+      const monthlyDemand = Math.max(1, weightedMonthly * momentum * config.demandFactor);
+      const monthlyNewStock = purchaseRate * config.purchaseFactor;
       let pool = [...scoredItems];
       const months = [];
       let totalSold = 0, totalRevenue = 0, totalProfit = 0;
+      let totalNewArrivals = 0, totalNewCost = 0;
 
       for (let m = 0; m < 3; m++) {
         const monthDate = addMonths(anchor, m + 1);
         const label = monthDate.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-        const budget = Math.min(Math.round(monthlyDemand), pool.length);
 
-        // Take the top `budget` items by probability
+        // STEP 1: New arrivals enter the pool
+        const arrivals = generateNewArrivals(monthlyNewStock);
+        pool = [...pool, ...arrivals].sort((a, b) => b.sellProbability - a.sellProbability);
+        totalNewArrivals += arrivals.length;
+        totalNewCost += arrivals.length * avgNewCost;
+
+        // STEP 2: Sell top items by probability
+        const budget = Math.min(Math.round(monthlyDemand), pool.length);
         const selling = pool.slice(0, budget);
         pool = pool.slice(budget);
 
         let monthRevenue = 0, monthProfit = 0;
+        let newSold = 0, oldSold = 0;
         selling.forEach((s) => {
-          const price = s.expectedPrice * multiplier.priceFactor;
+          const price = s.expectedPrice * config.priceFactor;
           monthRevenue += price;
           monthProfit += price - s.cost;
+          if (s.isNewArrival) newSold++; else oldSold++;
+        });
+
+        // STEP 3: Age remaining pool items (+30 days per month)
+        pool.forEach((s) => {
+          if (!s.isNewArrival) {
+            s.daysInStock += 30;
+            s.sellProbability = Math.max(0.02, s.sellProbability * 0.92);
+            s.expectedPrice *= 0.97;
+          }
         });
 
         totalSold += selling.length;
         totalRevenue += monthRevenue;
         totalProfit += monthProfit;
-        months.push({ label, units: selling.length, revenue: monthRevenue, profit: monthProfit, remainingStock: pool.length });
+
+        months.push({
+          label, units: selling.length, revenue: monthRevenue, profit: monthProfit,
+          remainingStock: pool.length, newArrivals: arrivals.length,
+          newSold, oldSold,
+          startStock: selling.length + pool.length
+        });
       }
 
       return {
         totalUnits: totalSold, totalRevenue, totalProfit,
         totalMargin: totalRevenue ? (totalProfit / totalRevenue) * 100 : 0,
-        monthly: months, remainingStock: pool.length
+        monthly: months, remainingStock: pool.length,
+        totalNewArrivals, totalNewCost,
+        investmentRequired: totalNewCost
       };
     }
 
     const scenarios = {
-      conservative: runDeterministicScenario(scenarioMultipliers.conservative),
-      base: runDeterministicScenario(scenarioMultipliers.base),
-      optimistic: runDeterministicScenario(scenarioMultipliers.optimistic)
+      conservative: runScenario(scenarioConfig.conservative),
+      base: runScenario(scenarioConfig.base),
+      optimistic: runScenario(scenarioConfig.optimistic)
     };
 
-    // ─── FORECAST DRIVERS ───
+    // ─── DRIVERS ───
     const avgSellProb = avg(scoredItems.map((s) => ({ p: s.sellProbability })), (o) => o.p);
     const highProbItems = scoredItems.filter((s) => s.sellProbability > 0.5).length;
     const lowProbItems = scoredItems.filter((s) => s.sellProbability < 0.2).length;
-    const avgAge = avg(scoredItems.map((s) => ({ d: s.daysInStock })), (o) => o.d);
     const freshStock = scoredItems.filter((s) => s.daysInStock <= 60).length;
     const deadStock = scoredItems.filter((s) => s.daysInStock > 180).length;
 
-    // Brand contribution breakdown
+    // Top models by expected revenue contribution
+    const modelContrib = new Map();
+    scoredItems.forEach((s) => {
+      const key = s.model || "_unknown";
+      if (!modelContrib.has(key)) modelContrib.set(key, { count: 0, expectedRev: 0, avgProb: 0 });
+      const g = modelContrib.get(key);
+      g.count += 1;
+      g.expectedRev += s.expectedPrice * s.sellProbability;
+      g.avgProb += s.sellProbability;
+    });
+    const topModels = [...modelContrib.entries()].map(([model, d]) => ({
+      model: displayModel(model), count: d.count,
+      expectedRevenue: d.expectedRev, avgProb: d.avgProb / d.count
+    })).sort((a, b) => b.expectedRevenue - a.expectedRevenue).slice(0, 5);
+
+    // Size analysis for forecast
+    const sizeContrib = new Map();
+    scoredItems.forEach((s) => {
+      const sz = s.size || "_unknown";
+      if (!sizeContrib.has(sz)) sizeContrib.set(sz, { count: 0, avgProb: 0 });
+      const g = sizeContrib.get(sz);
+      g.count += 1;
+      g.avgProb += s.sellProbability;
+    });
+    const topSizes = [...sizeContrib.entries()].map(([size, d]) => ({
+      size, count: d.count, avgProb: d.avgProb / d.count
+    })).sort((a, b) => b.avgProb - a.avgProb).slice(0, 5);
+    const worstSizes = [...sizeContrib.entries()].map(([size, d]) => ({
+      size, count: d.count, avgProb: d.avgProb / d.count
+    })).sort((a, b) => a.avgProb - b.avgProb).slice(0, 3);
+
+    // Brand contribution
     const brandContrib = new Map();
     scoredItems.forEach((s) => {
       const b = s.brand || "_unknown";
@@ -952,39 +1092,37 @@
       g.totalProb += s.sellProbability;
       g.expectedRev += s.expectedPrice * s.sellProbability;
     });
+    const brandContribArr = [...brandContrib.entries()].map(([brand, d]) => ({
+      brand: titleCase(brand), count: d.count, avgProb: d.totalProb / d.count,
+      expectedRevenue: d.expectedRev
+    })).sort((a, b) => b.expectedRevenue - a.expectedRevenue);
 
     const drivers = {
-      avgSellProbability: avgSellProb,
-      highProbItems,
-      lowProbItems,
-      momentum,
-      monthlyDemandBase: weightedMonthly,
+      avgSellProbability: avgSellProb, highProbItems, lowProbItems,
+      momentum, monthlyDemandBase: weightedMonthly,
       priceRealization: globalPriceRealization,
-      avgAge,
-      freshStock,
-      deadStock,
-      totalInventory: inventory.length,
-      brandContributions: [...brandContrib.entries()].map(([brand, data]) => ({
-        brand: titleCase(brand), count: data.count, avgProb: data.totalProb / data.count,
-        expectedRevenue: data.expectedRev
-      })).sort((a, b) => b.expectedRevenue - a.expectedRevenue)
+      avgAge: avg(scoredItems.map((s) => ({ d: s.daysInStock })), (o) => o.d),
+      freshStock, deadStock, totalInventory: inventory.length,
+      purchaseRate, purchaseQuality, avgPurchaseCost: avgNewCost,
+      brandContributions: brandContribArr,
+      topModels, topSizes, worstSizes,
+      purchaseBrandMix: [...intel.purchaseBrandMix.entries()]
+        .map(([b, c]) => ({ brand: titleCase(b), count: c }))
+        .sort((a, b) => b.count - a.count).slice(0, 5)
     };
 
-    // ─── WATERFALL (stock depletion) ───
+    // Waterfall
     const base = scenarios.base;
-    const waterfall = base.monthly.map((m, i) => ({
-      label: m.label,
-      startStock: i === 0 ? inventory.length : base.monthly[i - 1].remainingStock,
-      sold: m.units,
-      endStock: m.remainingStock
+    const waterfall = base.monthly.map((m) => ({
+      label: m.label, sold: m.units, newArrivals: m.newArrivals,
+      remainingStock: m.remainingStock, startStock: m.startStock
     }));
 
+    const brandCount = brandContrib.size;
+    const modelCount = modelContrib.size;
     return {
-      scenarios,
-      drivers,
-      waterfall,
-      monthly: base.monthly,
-      method: `Probabilistic model scoring ${num(inventory.length)} inventory items across ${num(brandContrib.size)} brands. Each item scored by brand velocity (sell-through rate), aging decay (sigmoid curve), and pricing readiness. Three scenarios vary demand (${scenarioMultipliers.conservative.demandFactor}x / ${scenarioMultipliers.base.demandFactor}x / ${scenarioMultipliers.optimistic.demandFactor}x) and price realization. Momentum factor: ${ratio(momentum)}.`
+      scenarios, drivers, waterfall,
+      method: `Full-cycle forecast scoring ${num(inventory.length)} items across ${num(modelCount)} models, ${num(brandCount)} brands and ${num(sizeContrib.size)} sizes. Layers: brand velocity, model demand, size demand, aging decay (sigmoid), pricing readiness. Purchase pipeline: ${num(purchaseRate, 1)} pairs/mo projected arrivals (quality score: ${pct(purchaseQuality * 100)}). Dynamic stock model adds new inventory each month and ages unsold stock. Momentum: ${ratio(momentum)}.`
     };
   }
 
@@ -999,69 +1137,77 @@
     const s = forecast.scenarios;
     const d = forecast.drivers;
     const w = forecast.waterfall;
-    const totalStock = d.totalInventory;
+    const base = s.base;
 
     els.forecastOutlook.innerHTML = `
-      <p class="forecast-section-label">Scenario Comparison</p>
+      <p class="forecast-section-label">3-Month Scenario Comparison</p>
       <div class="forecast-scenarios">
         <div class="scenario-card conservative">
           <span class="scenario-label">Conservative</span>
           <span class="scenario-value">${euro(s.conservative.totalRevenue, 0)}</span>
-          <span class="scenario-sub">${num(s.conservative.totalUnits)} pairs &middot; ${pct(s.conservative.totalMargin)} margin</span>
-          <span class="scenario-detail">Est. profit: ${euro(s.conservative.totalProfit, 0)}<br>Remaining: ${num(s.conservative.remainingStock)} pairs</span>
+          <span class="scenario-sub">${num(s.conservative.totalUnits)} sales &middot; ${pct(s.conservative.totalMargin)} margin</span>
+          <span class="scenario-detail">Profit: ${euro(s.conservative.totalProfit, 0)}<br>+${num(s.conservative.totalNewArrivals)} new arrivals<br>Investment: ${euro(s.conservative.investmentRequired, 0)}</span>
         </div>
         <div class="scenario-card base">
           <span class="scenario-label">Base Case</span>
-          <span class="scenario-value">${euro(s.base.totalRevenue, 0)}</span>
-          <span class="scenario-sub">${num(s.base.totalUnits)} pairs &middot; ${pct(s.base.totalMargin)} margin</span>
-          <span class="scenario-detail">Est. profit: ${euro(s.base.totalProfit, 0)}<br>Remaining: ${num(s.base.remainingStock)} pairs</span>
+          <span class="scenario-value">${euro(base.totalRevenue, 0)}</span>
+          <span class="scenario-sub">${num(base.totalUnits)} sales &middot; ${pct(base.totalMargin)} margin</span>
+          <span class="scenario-detail">Profit: ${euro(base.totalProfit, 0)}<br>+${num(base.totalNewArrivals)} new arrivals<br>Investment: ${euro(base.investmentRequired, 0)}</span>
         </div>
         <div class="scenario-card optimistic">
           <span class="scenario-label">Optimistic</span>
           <span class="scenario-value">${euro(s.optimistic.totalRevenue, 0)}</span>
-          <span class="scenario-sub">${num(s.optimistic.totalUnits)} pairs &middot; ${pct(s.optimistic.totalMargin)} margin</span>
-          <span class="scenario-detail">Est. profit: ${euro(s.optimistic.totalProfit, 0)}<br>Remaining: ${num(s.optimistic.remainingStock)} pairs</span>
+          <span class="scenario-sub">${num(s.optimistic.totalUnits)} sales &middot; ${pct(s.optimistic.totalMargin)} margin</span>
+          <span class="scenario-detail">Profit: ${euro(s.optimistic.totalProfit, 0)}<br>+${num(s.optimistic.totalNewArrivals)} new arrivals<br>Investment: ${euro(s.optimistic.investmentRequired, 0)}</span>
         </div>
       </div>
 
-      <p class="forecast-section-label">Base Case Monthly Breakdown</p>
+      <p class="forecast-section-label">Monthly Flow (Base Case): Stock + Arrivals &minus; Sales</p>
       <div class="forecast-months">
-        ${s.base.monthly.map((m) => `
+        ${base.monthly.map((m) => `
           <div class="forecast-row">
-            <div><strong>${m.label}</strong><span>Probability-weighted</span></div>
+            <div><strong>${m.label}</strong><span>+${num(m.newArrivals)} new &middot; ${num(m.oldSold)} old sold &middot; ${num(m.newSold)} new sold</span></div>
             <div class="forecast-metric"><strong>${num(m.units)}</strong><span>sales</span></div>
             <div class="forecast-metric"><strong>${euro(m.revenue, 0)}</strong><span>revenue</span></div>
             <div class="forecast-metric"><strong>${euro(m.profit, 0)}</strong><span>profit</span></div>
           </div>`).join("")}
       </div>
 
-      <p class="forecast-section-label">Stock Depletion</p>
+      <p class="forecast-section-label">Stock Evolution</p>
       <div class="forecast-waterfall">
-        ${w.map((month) => `
+        ${w.map((m) => `
           <div class="waterfall-bar-row">
-            <span class="waterfall-label">${month.label}</span>
+            <span class="waterfall-label">${m.label}</span>
             <div class="waterfall-track">
-              <div class="waterfall-fill sold" style="width:${(month.sold / totalStock) * 100}%" title="${month.sold} sold"></div>
+              <div class="waterfall-fill stock" style="width:${Math.min(100, (m.remainingStock / Math.max(d.totalInventory, 1)) * 100)}%">${num(m.remainingStock)}</div>
             </div>
-            <span class="waterfall-value">${num(month.endStock)} left</span>
+            <span class="waterfall-value">+${num(m.newArrivals)} &minus;${num(m.sold)}</span>
           </div>`).join("")}
-        <div class="waterfall-bar-row" style="margin-top:4px; padding-top:8px; border-top:1px solid var(--line)">
-          <span class="waterfall-label" style="font-weight:800">Total</span>
-          <div class="waterfall-track">
-            <div class="waterfall-fill remaining" style="width:${(s.base.remainingStock / totalStock) * 100}%"></div>
-          </div>
-          <span class="waterfall-value">${pct((s.base.totalUnits / totalStock) * 100)} sold</span>
-        </div>
       </div>
 
-      <p class="forecast-section-label">Forecast Drivers</p>
+      <p class="forecast-section-label">Purchase Pipeline</p>
       <div class="forecast-drivers">
-        <div class="driver-card"><span class="driver-label">Avg Sell Probability</span><span class="driver-value">${pct(d.avgSellProbability * 100)}</span><span class="driver-note">${num(d.highProbItems)} high-prob (>50%) &middot; ${num(d.lowProbItems)} low-prob (<20%)</span></div>
-        <div class="driver-card"><span class="driver-label">Momentum</span><span class="driver-value">${ratio(d.momentum)}x</span><span class="driver-note">${d.momentum >= 1 ? "Accelerating" : "Decelerating"} vs. prior period</span></div>
-        <div class="driver-card"><span class="driver-label">Demand Base</span><span class="driver-value">${num(d.monthlyDemandBase, 1)} /mo</span><span class="driver-note">weighted 6-month history</span></div>
+        <div class="driver-card"><span class="driver-label">Purchase Rate</span><span class="driver-value">${num(d.purchaseRate, 1)} /mo</span><span class="driver-note">recent 3-month average</span></div>
+        <div class="driver-card"><span class="driver-label">Purchase Quality</span><span class="driver-value">${pct(d.purchaseQuality * 100)}</span><span class="driver-note">buy brands that sell? ${d.purchaseQuality >= 0.35 ? "Good" : d.purchaseQuality >= 0.25 ? "Fair" : "Weak"}</span></div>
+        <div class="driver-card"><span class="driver-label">Avg Purchase Cost</span><span class="driver-value">${euro(d.avgPurchaseCost, 0)}</span><span class="driver-note">per pair (recent buys)</span></div>
+        <div class="driver-card"><span class="driver-label">Buying Mix</span><span class="driver-value">${d.purchaseBrandMix[0] ? d.purchaseBrandMix[0].brand : "N/A"}</span><span class="driver-note">${d.purchaseBrandMix.map((b) => `${b.brand}: ${b.count}`).join(" &middot; ")}</span></div>
+      </div>
+
+      <p class="forecast-section-label">Model Demand Ranking</p>
+      <div class="forecast-drivers">
+        ${d.topModels.map((m) => `
+          <div class="driver-card"><span class="driver-label">${m.model}</span><span class="driver-value">${euro(m.expectedRevenue, 0)}</span><span class="driver-note">${num(m.count)} in stock &middot; ${pct(m.avgProb * 100)} sell prob</span></div>
+        `).join("")}
+      </div>
+
+      <p class="forecast-section-label">Demand & Risk Drivers</p>
+      <div class="forecast-drivers">
+        <div class="driver-card"><span class="driver-label">Sell Probability</span><span class="driver-value">${pct(d.avgSellProbability * 100)}</span><span class="driver-note">${num(d.highProbItems)} high (&gt;50%) &middot; ${num(d.lowProbItems)} low (&lt;20%)</span></div>
+        <div class="driver-card"><span class="driver-label">Momentum</span><span class="driver-value">${ratio(d.momentum)}x</span><span class="driver-note">${d.momentum >= 1 ? "Accelerating" : "Decelerating"} demand</span></div>
+        <div class="driver-card"><span class="driver-label">Stock Freshness</span><span class="driver-value">${num(d.freshStock)} fresh</span><span class="driver-note">${num(d.deadStock)} dead (&gt;180d) &middot; avg ${num(d.avgAge)}d</span></div>
         <div class="driver-card"><span class="driver-label">Price Realization</span><span class="driver-value">${pct(d.priceRealization * 100)}</span><span class="driver-note">actual vs target price</span></div>
-        <div class="driver-card"><span class="driver-label">Stock Freshness</span><span class="driver-value">${num(d.freshStock)} fresh</span><span class="driver-note">${num(d.deadStock)} dead (>180d) &middot; avg ${num(d.avgAge)}d</span></div>
-        <div class="driver-card"><span class="driver-label">Top Brand</span><span class="driver-value">${d.brandContributions[0] ? d.brandContributions[0].brand : "N/A"}</span><span class="driver-note">${d.brandContributions[0] ? `${num(d.brandContributions[0].count)} items &middot; ${pct(d.brandContributions[0].avgProb * 100)} avg prob` : ""}</span></div>
+        <div class="driver-card"><span class="driver-label">Best Sizes</span><span class="driver-value">${d.topSizes[0] ? d.topSizes[0].size : "-"}</span><span class="driver-note">${d.topSizes.map((s) => `${s.size}: ${pct(s.avgProb * 100)}`).join(" &middot; ")}</span></div>
+        <div class="driver-card"><span class="driver-label">Slowest Sizes</span><span class="driver-value">${d.worstSizes[0] ? d.worstSizes[0].size : "-"}</span><span class="driver-note">${d.worstSizes.map((s) => `${s.size}: ${pct(s.avgProb * 100)}`).join(" &middot; ")}</span></div>
       </div>
 
       <div class="forecast-method" style="margin-top:12px">${forecast.method}</div>
