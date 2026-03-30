@@ -311,9 +311,17 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: var(--shadow-xs);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
 }
 
+.section-nav::-webkit-scrollbar { display: none; }
+
 .nav-link {
+  flex: 0 0 auto;
   text-align: center;
   text-decoration: none;
   padding: 10px 20px;
@@ -324,6 +332,7 @@ h3 {
   border: 1px solid transparent;
   min-width: 100px;
   transition: all 200ms var(--ease-out);
+  scroll-snap-align: start;
 }
 
 .nav-link:hover {
@@ -686,7 +695,6 @@ tbody tr:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-areas:
     "trend trend trend"
-    "forecast forecast forecast"
     "health margin-dist winners"
     "price capital demand"
     "brand brand brand";
@@ -695,7 +703,6 @@ tbody tr:hover {
 }
 
 .trend-panel { grid-area: trend; }
-.forecast-panel { grid-area: forecast; }
 .health-panel { grid-area: health; }
 .margin-dist-panel { grid-area: margin-dist; }
 .winners-panel { grid-area: winners; }
@@ -833,279 +840,6 @@ tbody tr:hover {
   color: var(--muted);
 }
 
-/* ─── Forecast ─── */
-.forecast-grid {
-  display: grid;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.forecast-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.forecast-card {
-  padding: 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-  position: relative;
-  overflow: hidden;
-}
-
-.forecast-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-}
-
-.forecast-card.good::before { background: var(--good); }
-.forecast-card.highlight::before { background: var(--accent); }
-
-.forecast-card span {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.forecast-card strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 24px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-
-.forecast-card em {
-  display: block;
-  margin-top: 8px;
-  color: var(--muted);
-  font-style: normal;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.forecast-card.good { background: linear-gradient(180deg, #f8fdfb, #eefaf4); border-color: #c6ecd9; }
-.forecast-card.highlight { background: linear-gradient(180deg, #f8faff, #eef4ff); border-color: #d4e0ff; }
-
-.forecast-months { display: grid; gap: 8px; }
-
-.forecast-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-  transition: all 200ms var(--ease-out);
-}
-
-.forecast-row:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-xs);
-}
-
-.forecast-row strong { font-size: 14px; font-weight: 700; }
-.forecast-row span { color: var(--muted); font-size: 12px; }
-.forecast-metric { text-align: right; }
-
-.forecast-method {
-  padding: 12px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px dashed var(--line-strong);
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* ─── Forecast Scenarios ─── */
-.forecast-scenarios {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.scenario-card {
-  padding: 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-  position: relative;
-  overflow: hidden;
-  transition: all 200ms var(--ease-out);
-}
-
-.scenario-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-}
-
-.scenario-card.conservative::before { background: var(--muted); }
-.scenario-card.base::before { background: var(--accent); }
-.scenario-card.optimistic::before { background: var(--good); }
-
-.scenario-card.base {
-  background: linear-gradient(180deg, #f8faff, #eef4ff);
-  border-color: #d4e0ff;
-  box-shadow: var(--shadow-sm);
-}
-
-.scenario-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.scenario-card.base .scenario-label { color: var(--accent); }
-.scenario-card.optimistic .scenario-label { color: var(--good); }
-
-.scenario-value {
-  display: block;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-}
-
-.scenario-sub {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.scenario-detail {
-  display: block;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.forecast-waterfall {
-  position: relative;
-  margin-top: 4px;
-  padding: 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-}
-
-.waterfall-bar-row {
-  display: grid;
-  grid-template-columns: 80px 1fr 80px;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 0;
-}
-
-.waterfall-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.waterfall-track {
-  height: 20px;
-  background: var(--surface-soft);
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--line);
-  overflow: hidden;
-  position: relative;
-}
-
-.waterfall-fill {
-  height: 100%;
-  border-radius: inherit;
-  transition: width 600ms var(--ease-out);
-  display: flex;
-  align-items: center;
-  padding-left: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #fff;
-  white-space: nowrap;
-}
-
-.waterfall-fill.stock { background: linear-gradient(90deg, #6b7280, #9ca3af); }
-.waterfall-fill.sold { background: linear-gradient(90deg, var(--accent), #818cf8); }
-.waterfall-fill.remaining { background: linear-gradient(90deg, var(--warn), #fbbf24); }
-
-.waterfall-value {
-  font-size: 13px;
-  font-weight: 700;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.forecast-drivers {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.driver-card {
-  padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--surface-strong);
-}
-
-.driver-card .driver-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.driver-card .driver-value {
-  display: block;
-  margin-top: 4px;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.driver-card .driver-note {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.forecast-section-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin-top: 16px;
-  margin-bottom: 8px;
-}
-
-.forecast-section-label:first-child { margin-top: 0; }
 
 /* ─── Rank Lists ─── */
 .list-block {
@@ -1174,6 +908,11 @@ tbody tr:hover {
 }
 
 .table-scroll { overflow: auto; }
+
+.table-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
 
 table {
   width: 100%;
@@ -1436,7 +1175,6 @@ tbody tr:last-child td { border-bottom: 0; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
       "trend trend"
-      "forecast forecast"
       "health margin-dist"
       "winners price"
       "capital demand"
@@ -1455,6 +1193,21 @@ tbody tr:last-child td { border-bottom: 0; }
 @media (max-width: 860px) {
   .app-shell { padding: 0 16px 40px; }
 
+  .command-header {
+    gap: 20px;
+    padding: 24px;
+  }
+
+  .header-status {
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .brand-block {
+    flex-direction: column;
+    text-align: center;
+  }
+
   .filter-stage-header {
     flex-direction: column;
     gap: 12px;
@@ -1466,33 +1219,43 @@ tbody tr:last-child td { border-bottom: 0; }
   }
 
   .filter-stage-grid { grid-template-columns: 1fr; }
-  .section-nav { overflow: auto; }
 
   .analytics-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "trend" "forecast" "health" "margin-dist"
+      "trend" "health" "margin-dist"
       "winners" "capital" "price" "demand" "brand";
   }
 
-  .forecast-scenarios {
-    grid-template-columns: 1fr;
-  }
-
-  .forecast-drivers {
-    grid-template-columns: 1fr;
-  }
 
   .north-star-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .mini-metric-grid { grid-template-columns: 1fr; }
-  .forecast-summary { grid-template-columns: 1fr; }
 
   .tab-bar {
     overflow: auto;
     width: 100%;
+    justify-content: flex-start;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  .tab-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .rank-header,
+  .priority-item {
+    align-items: flex-start;
+  }
+
+  .chart-area {
+    min-height: 280px;
   }
 }
 
@@ -1509,11 +1272,117 @@ tbody tr:last-child td { border-bottom: 0; }
     padding: 20px;
   }
 
+  .command-header {
+    padding: 18px;
+    border-radius: 0 0 18px 18px;
+  }
+
+  .header-status {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .header-right,
+  .filter-stage-actions {
+    width: 100%;
+  }
+
+  .header-right .primary-button,
+  .filter-stage-actions .secondary-button {
+    width: 100%;
+  }
+
+  .brand-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .brand-mark-core {
+    font-size: 22px;
+  }
+
+  .page-intro,
+  .hero-copy,
+  .panel-header p,
+  .focus-header p,
+  .filter-stage-header p:last-child {
+    max-width: none;
+  }
+
   .north-star-cards { grid-template-columns: 1fr; }
 
   .hero-topline,
   .panel-header,
   .section-header {
     flex-direction: column;
+    gap: 12px;
+  }
+
+  .section-note {
+    white-space: normal;
+    width: 100%;
+    text-align: center;
+  }
+
+  .filter-chip {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .priority-item,
+  .rank-header,
+  .margin-bar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .priority-item,
+  .rank-header {
+    flex-direction: column;
+  }
+
+  .rank-header span {
+    display: block;
+    width: 100%;
+  }
+
+  .margin-bar-row {
+    gap: 8px;
+  }
+
+  .margin-bar-value {
+    text-align: left;
+  }
+
+  .mini-metric {
+    padding: 14px;
+  }
+
+  .mini-metric strong {
+    font-size: 20px;
+  }
+
+  th, td {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  table {
+    min-width: 640px;
+  }
+
+  .chart-area {
+    min-height: 240px;
+  }
+
+  .chart-legend {
+    gap: 10px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+
+  .dashboard-footer {
+    margin-top: 24px;
+    padding: 18px 12px;
   }
 }
