@@ -192,10 +192,20 @@
   }
 
   function buildRecord(row) {
-    const ek = nOrNull(pickField(row, ["einkaufspreis_netto", "purchase_price_net", "unit_cost", "cost_net"]));
-    const vk = nOrNull(pickField(row, ["verkaufspreis_netto", "sale_price_net", "selling_price_net", "revenue_net"]));
+    const ekNet = nOrNull(pickField(row, ["einkaufspreis_netto", "purchase_price_net", "unit_cost", "cost_net"]));
+    const ekGross = nOrNull(pickField(row, ["einkaufspreis_brutto", "purchase_price_gross", "unit_cost_gross"]));
+    const vkNet = nOrNull(pickField(row, ["verkaufspreis_netto", "sale_price_net", "selling_price_net", "revenue_net"]));
+    const vkGross = nOrNull(pickField(row, ["verkaufspreis_brutto", "sale_price_gross", "selling_price_gross"]));
+    const shippingIn = nOrNull(pickField(row, ["versandkosten_einkauf", "shipping_cost_purchase", "shipping_in"]));
+    const shippingOut = nOrNull(pickField(row, ["versandkosten_verkauf", "shipping_cost_sale", "shipping_out"]));
     const status = normalizeStatusValue(pickField(row, ["status", "inventory_status", "state"]));
-    const gp = ek != null && vk != null ? vk - ek : null;
+    const sheetProfit = nOrNull(pickField(row, ["netto_gewinn", "net_profit"]));
+    const sheetPotProfit = nOrNull(pickField(row, ["pot_gewinn", "potential_profit"]));
+    // Use sheet's netto_gewinn when available (includes shipping), otherwise compute
+    const ek = ekNet;
+    const vk = vkNet;
+    const computedProfit = ek != null && vk != null ? vk - ek - (shippingIn || 0) - (shippingOut || 0) : null;
+    const gp = sheetProfit != null ? sheetProfit : computedProfit;
     return {
       article_id: nOrNull(pickField(row, ["artikel_id", "article_id", "product_id", "id"])),
       brand: norm(pickField(row, ["marke", "brand"])),
@@ -209,18 +219,26 @@
       condition: norm(pickField(row, ["zustand", "condition"])),
       status,
       purchase_date: parseFlexibleDate(pickField(row, ["kaufdatum", "purchase_date", "buy_date"])),
+      purchase_price_gross: ekGross,
       purchase_price_net: ek,
+      shipping_cost_purchase: shippingIn,
+      purchase_type: norm(pickField(row, ["kaufart", "purchase_type"])),
+      target_sale_price_gross: nOrNull(pickField(row, ["ziel_vk_brutto", "target_sale_price_gross"])),
       target_sale_price_net: nOrNull(pickField(row, ["ziel_vk_netto", "target_sale_price_net", "target_net"])),
+      sale_price_gross: vkGross,
       sale_price_net: vk,
+      shipping_cost_sale: shippingOut,
       sale_date: parseFlexibleDate(pickField(row, ["verkaufsdatum", "sale_date", "sold_at"])),
       purchase_platform: norm(pickField(row, ["plattform_einkauf", "purchase_platform", "buy_channel"])),
       sales_channel: norm(pickField(row, ["plattform_verkauf", "sales_channel", "channel"])),
       sales_country: norm(pickField(row, ["land_verkauf", "sales_country", "country"])),
+      potential_profit: sheetPotProfit,
       gross_profit: gp,
       margin_pct: gp != null && vk ? (gp / vk) * 100 : null,
       inventory_units: status === "lager" ? 1 : 0,
       sold_units: status === "verkauft" ? 1 : 0,
       inventory_value_cost: status === "lager" ? ek || 0 : 0,
+      total_shipping: (shippingIn || 0) + (shippingOut || 0),
       days_in_stock: ((Date.now() - (date(parseFlexibleDate(pickField(row, ["kaufdatum", "purchase_date", "buy_date"]))) || new Date()).getTime()) / 86400000) | 0,
       model: [
         pickField(row, ["serie", "series"]),
@@ -488,7 +506,8 @@
       { label: "Avg Inventory Age", value: `${num(avg(inv, (r) => r.days_in_stock))} days`, note: "active inventory" },
       { label: "No Target Price", value: num(inv.filter((r) => !r.target_sale_price_net).length), note: "pricing risk" },
       { label: "Capital >120d", value: euro(sum(capitalAtRisk, (r) => r.inventory_value_cost), 0), note: "losing mobility" },
-      { label: "Active Brands", value: num(uniq(rows.map((r) => r.brand)).length), note: "current selection" }
+      { label: "Active Brands", value: num(uniq(rows.map((r) => r.brand)).length), note: "current selection" },
+      { label: "Shipping Load", value: euro(sum(rows, (r) => r.total_shipping), 0), note: `${euro(avg(rows.filter((r) => r.total_shipping > 0), (r) => r.total_shipping), 0)} avg per item` }
     ];
     els.businessHealth.innerHTML = items.map((i) => `<div class="mini-metric"><span>${i.label}</span><strong>${i.value}</strong><em>${i.note}</em></div>`).join("");
   }
@@ -796,6 +815,15 @@
     const yearProfit = sum(sold2026, (r) => r.gross_profit);
     const yearPurchase = sum(bought2026, (r) => r.purchase_price_net);
 
+    const totalShippingIn = sum(rows, (r) => r.shipping_cost_purchase);
+    const totalShippingOut = sum(sold, (r) => r.shipping_cost_sale);
+    const totalShipping = totalShippingIn + totalShippingOut;
+    const privatePurchases = rows.filter((r) => r.purchase_type === "privat").length;
+    const gewerblichPurchases = rows.filter((r) => r.purchase_type === "gewerblich").length;
+
+    const yearShippingIn = sum(bought2026, (r) => r.shipping_cost_purchase);
+    const yearShippingOut = sum(sold2026, (r) => r.shipping_cost_sale);
+
     return {
       overall: {
         sold_pairs: sold.length, inventory_pairs: inventory.length,
@@ -813,7 +841,9 @@
         inventory_value_target: sum(inventory, (r) => r.target_sale_price_net),
         average_sale_price_net: avg(sold, (r) => r.sale_price_net),
         average_profit_per_pair: avg(sold, (r) => r.gross_profit),
-        active_brands: uniq(rows.map((r) => r.brand)).length
+        active_brands: uniq(rows.map((r) => r.brand)).length,
+        total_shipping: totalShipping, shipping_in: totalShippingIn, shipping_out: totalShippingOut,
+        privat_count: privatePurchases, gewerblich_count: gewerblichPurchases
       },
       y2026: {
         sold_pairs: sold2026.length, bought_pairs: bought2026.length,
@@ -822,7 +852,8 @@
         capital_turnover: yearPurchase ? yearRevenue / yearPurchase : 0,
         average_sale_price_net: avg(sold2026, (r) => r.sale_price_net),
         average_profit_per_pair: avg(sold2026, (r) => r.gross_profit),
-        margin_pct: yearRevenue ? (yearProfit / yearRevenue) * 100 : 0
+        margin_pct: yearRevenue ? (yearProfit / yearRevenue) * 100 : 0,
+        shipping_total: yearShippingIn + yearShippingOut
       }
     };
   }
@@ -846,7 +877,9 @@
       { label: "No Target Price", value: num(o.inventory_without_target), meta: `${num(o.active_brands)} brands`, tone: o.inventory_without_target ? "warn" : "good" },
       { label: "Avg Cost In Stock", value: euro(o.average_purchase_price_inventory, 0), delta: "inventory only" },
       { label: "Avg Target Price", value: euro(o.average_target_price_inventory, 0), delta: "inventory only" },
-      { label: "Inv. Value (Target)", value: euro(o.inventory_value_target, 0), delta: "based on target price" }
+      { label: "Inv. Value (Target)", value: euro(o.inventory_value_target, 0), delta: "based on target price" },
+      { label: "Shipping Costs", value: euro(o.total_shipping, 0), delta: `${euro(o.shipping_in, 0)} in · ${euro(o.shipping_out, 0)} out`, tone: o.total_shipping > 0 ? "warn" : "" },
+      { label: "Purchase Type", value: `${num(o.gewerblich_count)} B2B`, delta: `${num(o.privat_count)} private` }
     ], "kpi-card");
     renderCards(els.yearKpiGrid, [
       { label: "Sold Pairs", value: num(y.sold_pairs), meta: "2026", tone: "highlight" },
@@ -855,6 +888,7 @@
       { label: "Net Profit", value: euro(y.profit_net, 0), meta: `${euro(y.average_profit_per_pair, 0)} /pair`, tone: y.profit_net > 0 ? "good" : "warn" },
       { label: "Margin", value: pct(y.margin_pct), meta: "profit / revenue", tone: y.margin_pct >= 30 ? "good" : y.margin_pct < 20 ? "bad" : "warn" },
       { label: "ROI per Euro", value: ratio(y.profit_per_invested_euro), meta: `${ratio(y.capital_turnover)} turnover`, tone: y.profit_per_invested_euro >= 0.4 ? "good" : "warn" },
+      { label: "Shipping Costs", value: euro(y.shipping_total, 0), meta: "2026 total", tone: y.shipping_total > 0 ? "warn" : "" }
     ], "focus-card");
   }
 
