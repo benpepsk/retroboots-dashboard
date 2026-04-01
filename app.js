@@ -694,11 +694,7 @@
       label: `Size ${label}`,
       value: data.sold,
       tooltip: `${num(data.sold)} sold | ${num(data.stock)} in stock<br>${euro(data.revenue, 0)} revenue`
-    })).sort((a, b) => {
-      // Sort by numeric size value for clean ordering
-      const toNum = (s) => parseFloat(String(s).replace(" 1/3", ".333").replace(" 2/3", ".667").replace(" 1/2", ".5").replace(" 1/4", ".25").replace(" 3/4", ".75").replace("Size ", "")) || 0;
-      return toNum(a.label) - toNum(b.label);
-    });
+    })).sort((a, b) => b.value - a.value);
     renderRankList(els.sizeDistribution, items, (v) => `${num(v)} sold`);
   }
 
