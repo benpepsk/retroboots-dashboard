@@ -473,7 +473,7 @@
         return {
           article: cell(
             displayProductName(r.brand, r.model, `${titleCase(r.brand || "")} #${r.article_id}`.trim(), true),
-            [r.generation ? `Gen. ${r.generation}` : null, r.color ? titleCase(r.color) : null, r.surface ? r.surface.toUpperCase() : null, r.size ? `Gr. ${r.size}` : null].filter(Boolean).join(" · ")
+            [r.generation ? `Gen. ${r.generation}` : null, r.color ? titleCase(r.color) : null, r.surface ? r.surface.toUpperCase() : null, `Gr. ${r.size || "-"}`].filter(Boolean).join(" · ")
           ),
           days_in_stock: num(days),
           purchase_price_net: euro(r.purchase_price_net, 0),
