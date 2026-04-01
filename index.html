@@ -278,8 +278,7 @@
             <div class="tab-bar" role="tablist" aria-label="Table sections">
               <button class="tab-button is-active" type="button" data-table="opportunities">Growth</button>
               <button class="tab-button" type="button" data-table="risks">Risk</button>
-              <button class="tab-button" type="button" data-table="inventory">Inventory Actions</button>
-              <button class="tab-button" type="button" data-table="margin-leaks">Margin Leaks</button>
+              <button class="tab-button" type="button" data-table="flip-critical">Flip Altware</button>
             </div>
 
             <div class="table-card is-active" data-table-panel="opportunities">
@@ -293,6 +292,17 @@
               <div class="table-shell" id="opportunities"></div>
             </div>
 
+            <div class="table-card" data-table-panel="flip-critical">
+              <div class="table-header">
+                <div>
+                  <h3>Flip Altware — Konkrete Fälle</h3>
+                  <p>Flip-Paare die zu lange liegen. Kapital ist gebunden, Verkauf hat Priorität.</p>
+                </div>
+                <div class="table-caption" id="flip-critical-count">0 items</div>
+              </div>
+              <div class="table-shell" id="flip-critical"></div>
+            </div>
+
             <div class="table-card" data-table-panel="risks">
               <div class="table-header">
                 <div>
@@ -304,27 +314,6 @@
               <div class="table-shell" id="risks"></div>
             </div>
 
-            <div class="table-card" data-table-panel="inventory">
-              <div class="table-header">
-                <div>
-                  <h3>Inventory Actions</h3>
-                  <p>Which items need repricing, monitoring or active inventory relief?</p>
-                </div>
-                <div class="table-caption" id="inventory-count">0 items</div>
-              </div>
-              <div class="table-shell" id="inventory-actions"></div>
-            </div>
-
-            <div class="table-card" data-table-panel="margin-leaks">
-              <div class="table-header">
-                <div>
-                  <h3>Margin Leaks</h3>
-                  <p>Sales where margin quality breaks down or profit leaks out.</p>
-                </div>
-                <div class="table-caption" id="margin-leaks-count">0 items</div>
-              </div>
-              <div class="table-shell" id="margin-leaks"></div>
-            </div>
           </section>
 
           <footer class="dashboard-footer">

@@ -30,12 +30,10 @@
     inventoryTurnover: $("inventory-turnover"),
     opportunities: $("opportunities"),
     risks: $("risks"),
-    inventoryActions: $("inventory-actions"),
-    marginLeaks: $("margin-leaks"),
+    flipCritical: $("flip-critical"),
     opportunitiesCount: $("opportunities-count"),
     risksCount: $("risks-count"),
-    inventoryCount: $("inventory-count"),
-    marginLeaksCount: $("margin-leaks-count"),
+    flipCriticalCount: $("flip-critical-count"),
     uiTooltip: $("ui-tooltip"),
     tabButtons: Array.from(document.querySelectorAll("[data-table]")),
     tabPanels: Array.from(document.querySelectorAll("[data-table-panel]"))
@@ -240,6 +238,7 @@
       inventory_value_cost: status === "lager" ? ek || 0 : 0,
       total_shipping: (shippingIn || 0) + (shippingOut || 0),
       days_in_stock: ((Date.now() - (date(parseFlexibleDate(pickField(row, ["kaufdatum", "purchase_date", "buy_date"]))) || new Date()).getTime()) / 86400000) | 0,
+      strategie: (() => { const v = normalizeHeaderKey(norm(pickField(row, ["strategie", "strategy"])) || ""); return v === "hold" ? "hold" : v === "flip" ? "flip" : null; })(),
       model: [
         pickField(row, ["serie", "series"]),
         pickField(row, ["sub_serie", "sub_series"]),
@@ -424,9 +423,11 @@
       const age = avg(inv, (r) => r.days_in_stock);
       const value = sum(inv, (r) => r.inventory_value_cost);
       const noTarget = inv.filter((r) => !r.target_sale_price_net).length;
+      const flipInv = inv.filter((r) => r.strategie !== "hold");
+      const flipAge = avg(flipInv, (r) => r.days_in_stock);
       let signal = "", tone = "warn";
-      if (stock >= 2 && sold === 0) { signal = "Slow mover"; tone = "bad"; }
-      else if (age >= 180) { signal = "Dead stock"; tone = "bad"; }
+      if (stock >= 2 && sold === 0 && flipInv.length > 0) { signal = "Slow mover"; tone = "bad"; }
+      else if (flipAge >= 180 && flipInv.length > 0) { signal = "Dead stock"; tone = "bad"; }
       else if (noTarget > 0) { signal = "Missing target price"; tone = "warn"; }
       else if (value >= 500 && sold <= 1) signal = "Capital tied up";
       return {
@@ -440,20 +441,49 @@
   function inventoryActions(rows) {
     return rows.filter((r) => r.inventory_units).map((r) => {
       let action = "Monitor", tone = "warn";
-      if ((r.days_in_stock || 0) > 180) { action = "De-risk now"; tone = "bad"; }
+      if (r.strategie === "hold") { action = "Long-term hold"; tone = "good"; }
+      else if ((r.days_in_stock || 0) > 180) { action = "De-risk now"; tone = "bad"; }
       else if (!r.target_sale_price_net) { action = "Set target price"; tone = "warn"; }
       else if ((r.days_in_stock || 0) > 120) { action = "Review pricing"; tone = "warn"; }
       else if (r.target_sale_price_net && r.purchase_price_net && ((r.target_sale_price_net - r.purchase_price_net) / r.target_sale_price_net) * 100 >= 30) { action = "Hold price"; tone = "good"; }
+      const stratLabel = r.strategie === "hold" ? "Hold" : r.strategie === "flip" ? "Flip" : "-";
+      const stratTone = r.strategie === "hold" ? "good" : r.strategie === "flip" ? "warn" : "warn";
       return {
         article: cell(displayProductName(r.brand, r.model, `${titleCase(r.brand || "")} #${r.article_id}`.trim(), false), `${r.size || "-"} | ${r.surface || "-"}`),
         brand: r.brand ? titleCase(r.brand) : "-",
-        status_badge: badge(displayStatus(r.status || "-"), r.status === "lager" ? "warn" : "good"),
+        strategie_badge: badge(stratLabel, stratTone),
         purchase_price_net: euro(r.purchase_price_net, 0),
         target_sale_price_net: r.target_sale_price_net ? euro(r.target_sale_price_net, 0) : "-",
         days_in_stock: num(r.days_in_stock),
         action_badge: badge(action, tone)
       };
     }).sort((a, b) => Number(b.days_in_stock.replace(/\./g, "")) - Number(a.days_in_stock.replace(/\./g, ""))).slice(0, 14);
+  }
+
+  function flipCriticalCases(rows) {
+    return rows
+      .filter((r) => r.inventory_units && r.strategie === "flip" && (r.days_in_stock || 0) >= 90)
+      .map((r) => {
+        const days = r.days_in_stock || 0;
+        const potProfit = r.target_sale_price_net != null && r.purchase_price_net != null
+          ? r.target_sale_price_net - r.purchase_price_net : null;
+        let urgency, tone;
+        if (days > 180) { urgency = "Sofort verkaufen"; tone = "bad"; }
+        else if (days > 120) { urgency = "Preischeck fällig"; tone = "warn"; }
+        else { urgency = "Im Blick behalten"; tone = "warn"; }
+        return {
+          article: cell(
+            displayProductName(r.brand, r.model, `${titleCase(r.brand || "")} #${r.article_id}`.trim(), true),
+            [r.generation ? `Gen. ${r.generation}` : null, r.color ? titleCase(r.color) : null, r.surface ? r.surface.toUpperCase() : null, r.size ? `Gr. ${r.size}` : null].filter(Boolean).join(" · ")
+          ),
+          days_in_stock: num(days),
+          purchase_price_net: euro(r.purchase_price_net, 0),
+          target_sale_price_net: r.target_sale_price_net ? euro(r.target_sale_price_net, 0) : "-",
+          pot_profit: potProfit != null ? euro(potProfit, 0) : "-",
+          urgency_badge: badge(urgency, tone),
+        };
+      })
+      .sort((a, b) => Number(b.days_in_stock.replace(/\./g, "")) - Number(a.days_in_stock.replace(/\./g, "")));
   }
 
   function marginLeaks(rows) {
@@ -496,17 +526,19 @@
     if (!els.businessHealth) return;
     const sold = rows.filter((r) => r.sold_units);
     const inv = rows.filter((r) => r.inventory_units);
-    const dead = inv.filter((r) => (r.days_in_stock || 0) > 180);
+    const flipInv = inv.filter((r) => r.strategie !== "hold");
+    const dead = flipInv.filter((r) => (r.days_in_stock || 0) > 180);
     const lowMargin = sold.filter((r) => (r.margin_pct || 0) < 20);
-    const capitalAtRisk = inv.filter((r) => (r.days_in_stock || 0) > 120);
+    const capitalAtRisk = flipInv.filter((r) => (r.days_in_stock || 0) > 120);
+    const holdCount = inv.filter((r) => r.strategie === "hold").length;
     const items = [
       { label: "Sell-through", value: pct((sold.length / ((sold.length + inv.length) || 1)) * 100), note: "sold vs. total" },
-      { label: "Dead Stock >180d", value: num(dead.length), note: `${euro(sum(dead, (r) => r.inventory_value_cost), 0)} tied up` },
+      { label: "Flip >180d", value: num(dead.length), note: `${euro(sum(dead, (r) => r.inventory_value_cost), 0)} tied up` },
       { label: "Profit Leaks", value: num(lowMargin.length), note: "sales below 20% margin" },
       { label: "Avg Inventory Age", value: `${num(avg(inv, (r) => r.days_in_stock))} days`, note: "active inventory" },
       { label: "No Target Price", value: num(inv.filter((r) => !r.target_sale_price_net).length), note: "pricing risk" },
-      { label: "Capital >120d", value: euro(sum(capitalAtRisk, (r) => r.inventory_value_cost), 0), note: "losing mobility" },
-      { label: "Active Brands", value: num(uniq(rows.map((r) => r.brand)).length), note: "current selection" },
+      { label: "Flip Capital >120d", value: euro(sum(capitalAtRisk, (r) => r.inventory_value_cost), 0), note: "flip – losing mobility" },
+      { label: "Hold Inventory", value: num(holdCount), note: "bewusst gehalten" },
       { label: "Shipping Load", value: euro(sum(rows, (r) => r.total_shipping), 0), note: `${euro(avg(rows.filter((r) => r.total_shipping > 0), (r) => r.total_shipping), 0)} avg per item` }
     ];
     els.businessHealth.innerHTML = items.map((i) => `<div class="mini-metric"><span>${i.label}</span><strong>${i.value}</strong><em>${i.note}</em></div>`).join("");
@@ -782,17 +814,18 @@
     }));
   }
 
-  function renderPriorities(rows, opps, risks, inv, leaks) {
+  function renderPriorities(rows, opps, risks, inv) {
     if (!els.priorityList) return;
     const sold = rows.filter((r) => r.sold_units);
     const missingTarget = inv.filter((r) => !r.target_sale_price_net).length;
-    const aged = inv.filter((r) => (r.days_in_stock || 0) > 180).length;
-    const capitalAtRisk = sum(inv.filter((r) => (r.days_in_stock || 0) > 120), (r) => r.inventory_value_cost);
+    const flipInv = inv.filter((r) => r.strategie !== "hold");
+    const aged = flipInv.filter((r) => (r.days_in_stock || 0) > 180).length;
+    const capitalAtRisk = sum(flipInv.filter((r) => (r.days_in_stock || 0) > 120), (r) => r.inventory_value_cost);
     const lowMarginSales = sold.filter((r) => (r.margin_pct || 0) < 20).length;
     const items = [
       { title: "Protect Growth", copy: `${opps.length} models show momentum or restock pressure.`, tone: opps.length ? "good" : "warn", value: opps.length },
-      { title: "Release Capital", copy: `${euro(capitalAtRisk, 0)} tied in inventory >120 days. ${aged} dead stock.`, tone: capitalAtRisk ? "bad" : "good", value: aged || 0 },
-      { title: "Defend Margin", copy: `${lowMarginSales} sales below 20% margin. ${leaks.length} in leak queue.`, tone: lowMarginSales ? "warn" : "good", value: lowMarginSales || 0 },
+      { title: "Release Capital", copy: `${euro(capitalAtRisk, 0)} tied in inventory >120 days. ${aged} flip >180d.`, tone: capitalAtRisk ? "bad" : "good", value: aged || 0 },
+      { title: "Defend Margin", copy: `${lowMarginSales} sales below 20% margin.`, tone: lowMarginSales ? "warn" : "good", value: lowMarginSales || 0 },
       { title: "Restore Control", copy: `${missingTarget} without target price. ${risks.length} with risk.`, tone: missingTarget || risks.length ? "warn" : "good", value: missingTarget + risks.length }
     ];
     els.priorityList.innerHTML = items.map((i) => `<div class="priority-item"><div class="priority-copy"><strong>${i.title}</strong><span>${i.copy}</span></div>${badge(num(i.value), i.tone)}</div>`).join("");
@@ -808,8 +841,9 @@
     const overallProfit = sum(sold, (r) => r.gross_profit);
     const overallSoldPurchase = sum(sold, (r) => r.purchase_price_net);
     const inventoryCost = sum(inventory, (r) => r.inventory_value_cost);
-    const deadStock = inventory.filter((r) => (r.days_in_stock || 0) > 180);
-    const stockAtRisk = inventory.filter((r) => (r.days_in_stock || 0) > 120);
+    const flipInventory = inventory.filter((r) => r.strategie !== "hold");
+    const deadStock = flipInventory.filter((r) => (r.days_in_stock || 0) > 180);
+    const stockAtRisk = flipInventory.filter((r) => (r.days_in_stock || 0) > 120);
     const sellThrough = (sold.length / ((sold.length + inventory.length) || 1)) * 100;
     const yearRevenue = sum(sold2026, (r) => r.sale_price_net);
     const yearProfit = sum(sold2026, (r) => r.gross_profit);
@@ -871,7 +905,7 @@
       { label: "Net Profit", value: euro(o.profit_net, 0), meta: `${euro(o.average_profit_per_pair, 0)} /pair`, tone: "highlight" },
       { label: "Margin", value: pct(o.margin_pct), meta: `${num(o.low_margin_sales)} below 20%`, tone: o.margin_pct >= 30 ? "good" : o.margin_pct < 20 ? "bad" : "warn" },
       { label: "Inventory Cost", value: euro(o.inventory_cost, 0), meta: `${num(o.inventory_pairs)} pairs`, tone: "warn" },
-      { label: "Capital >120d", value: euro(o.capital_at_risk_cost, 0), meta: `${num(o.dead_stock_count)} dead stock`, tone: o.capital_at_risk_cost ? "bad" : "good" },
+      { label: "Flip Capital >120d", value: euro(o.capital_at_risk_cost, 0), meta: `${num(o.dead_stock_count)} flip >180d`, tone: o.capital_at_risk_cost ? "bad" : "good" },
       { label: "Sell-through", value: pct(o.sell_through_pct), meta: "sold vs. available", tone: o.sell_through_pct >= 40 ? "good" : o.sell_through_pct < 25 ? "bad" : "warn" },
       { label: "Avg Inv. Age", value: `${num(o.avg_inventory_age)} days`, meta: "active inventory", tone: o.avg_inventory_age > 120 ? "bad" : o.avg_inventory_age > 75 ? "warn" : "good" },
       { label: "No Target Price", value: num(o.inventory_without_target), meta: `${num(o.active_brands)} brands`, tone: o.inventory_without_target ? "warn" : "good" },
@@ -898,12 +932,11 @@
     const inv = rows.filter((r) => r.inventory_units);
     const opps = findOpportunities(rows);
     const risks = findRisks(rows);
-    const actions = inventoryActions(rows);
-    const leaks = marginLeaks(rows);
+    const flipCritical = flipCriticalCases(rows);
 
     renderSummaryCards(rows);
     renderFilterChips();
-    renderPriorities(rows, opps, risks, inv, leaks);
+    renderPriorities(rows, opps, risks, inv);
     renderBusinessHealth(rows);
     renderTrendChart(sold);
     renderAgeBuckets(rows);
@@ -923,14 +956,12 @@
     renderChannelPerformance(rows);
     renderTable(els.opportunities, opps, [["Model", "model"], ["Brand", "brand"], ["Sales", "sold_units"], ["Stock", "inventory_units"], ["Margin", "margin_badge"], ["Signal", "signal_badge"]]);
     renderTable(els.risks, risks, [["Model", "model"], ["Brand", "brand"], ["Stock", "inventory_units"], ["Days", "days_in_stock"], ["Cost Value", "inventory_value_cost"], ["Signal", "signal_badge"]]);
-    renderTable(els.inventoryActions, actions, [["Item", "article"], ["Brand", "brand"], ["Status", "status_badge"], ["Cost", "purchase_price_net"], ["Target", "target_sale_price_net"], ["Days", "days_in_stock"], ["Action", "action_badge"]]);
-    renderTable(els.marginLeaks, leaks, [["Item", "article"], ["Brand", "brand"], ["Revenue", "sale_price_net"], ["Profit", "profit_net"], ["Margin", "margin_badge"], ["Signal", "signal_badge"]]);
+    renderTable(els.flipCritical, flipCritical, [["Schuh", "article"], ["Tage", "days_in_stock"], ["EK netto", "purchase_price_net"], ["Ziel VK", "target_sale_price_net"], ["Pot. Gewinn", "pot_profit"], ["Priorität", "urgency_badge"]]);
 
     els.workbenchCounts.textContent = `${num(rows.length)} records`;
     els.opportunitiesCount.textContent = `${num(opps.length)} items`;
     els.risksCount.textContent = `${num(risks.length)} items`;
-    els.inventoryCount.textContent = `${num(actions.length)} items`;
-    els.marginLeaksCount.textContent = `${num(leaks.length)} items`;
+    if (els.flipCriticalCount) els.flipCriticalCount.textContent = `${num(flipCritical.length)} Paare`;
     els.generatedAt.textContent = new Date(state.summary.generated_at || Date.now()).toLocaleString("de-DE");
     els.dataSourceLabel.textContent = state.dataSource === "google-sheet"
       ? (state.summary.live_mode === "csv" ? "Google Sheets (CSV)" : "Google Sheets (Live)")
