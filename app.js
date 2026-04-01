@@ -462,15 +462,14 @@
 
   function flipCriticalCases(rows) {
     return rows
-      .filter((r) => r.inventory_units && r.strategie === "flip" && (r.days_in_stock || 0) >= 90)
+      .filter((r) => r.inventory_units && r.strategie === "flip" && (r.days_in_stock || 0) > 120)
       .map((r) => {
         const days = r.days_in_stock || 0;
         const potProfit = r.target_sale_price_net != null && r.purchase_price_net != null
           ? r.target_sale_price_net - r.purchase_price_net : null;
         let urgency, tone;
-        if (days > 180) { urgency = "Sofort verkaufen"; tone = "bad"; }
-        else if (days > 120) { urgency = "Preischeck fällig"; tone = "warn"; }
-        else { urgency = "Im Blick behalten"; tone = "warn"; }
+        if (days > 180) { urgency = "Sell now"; tone = "bad"; }
+        else { urgency = "Price check due"; tone = "warn"; }
         return {
           article: cell(
             displayProductName(r.brand, r.model, `${titleCase(r.brand || "")} #${r.article_id}`.trim(), true),
