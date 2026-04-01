@@ -133,6 +133,25 @@
     return t.toLowerCase() === "shopfiy" ? "shopify" : t;
   }
 
+  function normalizeShoeSize(v) {
+    if (v == null || v === "") return null;
+    const raw = String(v).trim();
+    // Already a nice string like "44 2/3" or "44.5" — keep as-is if not a plain float
+    if (/[\/\s]/.test(raw) && !/^\d+[\.,]\d+$/.test(raw)) return raw;
+    const n = Number(raw.replace(",", "."));
+    if (!Number.isFinite(n)) return raw || null;
+    const whole = Math.floor(n);
+    const frac = Math.round((n - whole) * 1000) / 1000;
+    if (frac === 0) return String(whole);
+    if (Math.abs(frac - 0.5) < 0.01) return `${whole} 1/2`;
+    if (Math.abs(frac - 0.333) < 0.01) return `${whole} 1/3`;
+    if (Math.abs(frac - 0.667) < 0.01) return `${whole} 2/3`;
+    if (Math.abs(frac - 0.25) < 0.01) return `${whole} 1/4`;
+    if (Math.abs(frac - 0.75) < 0.01) return `${whole} 3/4`;
+    // Fallback: keep original string
+    return raw;
+  }
+
   function normalizeHeaderKey(value) {
     return String(value || "")
       .toLowerCase()
@@ -213,7 +232,7 @@
       generation: norm(pickField(row, ["generation"])),
       color: norm(pickField(row, ["farbe", "color"])),
       surface: norm(pickField(row, ["untergrund", "surface", "sole_type"])),
-      size: norm(pickField(row, ["groesse", "size"])),
+      size: normalizeShoeSize(pickField(row, ["groesse", "size"])),
       condition: norm(pickField(row, ["zustand", "condition"])),
       status,
       purchase_date: parseFlexibleDate(pickField(row, ["kaufdatum", "purchase_date", "buy_date"])),
@@ -675,7 +694,11 @@
       label: `Size ${label}`,
       value: data.sold,
       tooltip: `${num(data.sold)} sold | ${num(data.stock)} in stock<br>${euro(data.revenue, 0)} revenue`
-    })).sort((a, b) => b.value - a.value).slice(0, 10);
+    })).sort((a, b) => {
+      // Sort by numeric size value for clean ordering
+      const toNum = (s) => parseFloat(String(s).replace(" 1/3", ".333").replace(" 2/3", ".667").replace(" 1/2", ".5").replace(" 1/4", ".25").replace(" 3/4", ".75").replace("Size ", "")) || 0;
+      return toNum(a.label) - toNum(b.label);
+    });
     renderRankList(els.sizeDistribution, items, (v) => `${num(v)} sold`);
   }
 
